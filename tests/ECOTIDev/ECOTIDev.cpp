@@ -4,8 +4,8 @@
 // entry put on directly: converted to the tagged stock goggle), then at night (lights and auto exposure down) an
 // AI in front with the goggle down and on (heat, HUD, a waypoint), that AI killed (cooling), and an outfit saved
 // and loaded with the fusion goggle. Without a headset the player's camera sits behind the goggle's tubes: for
-// the wearer's view the goggle's model is hidden for the shot (which also drops the lens mask, so the picture
-// isn't phosphor-coloured there). "SNAP <name>" = a game-rendered screenshot.
+// the wearer's view the goggle's model is hidden for the shot, all but its lenses (they write the stencil that
+// masks the picture and the heat to the tubes). "ai_heat_outside" (from beside the AI) must show no heat. "SNAP <name>" = a game-rendered screenshot.
 // The runner snapshots and restores SaveGames: the save test writes an outfit slot.
 #define NOMINMAX
 #include <GML/GML.hpp>
@@ -302,6 +302,11 @@ static void GoggleModel(bool show) {
     if (!mount) return;
     Params v(mount, "SetVisibility");
     v.Set("bNewVisibility", show).Set("bPropagateToChildren", true).Call();
+    // The lenses stay: they write the stencil (250) that masks the night-vision picture and the heat to the tubes.
+    if (Object lenses = nvg.GetObj("Lenses")) {
+        Params l(lenses, "SetVisibility");
+        l.Set("bNewVisibility", true).Set("bPropagateToChildren", false).Call();
+    }
 }
 // A gear menu tile for `item`, pressed (its button's bound event, as a click sends it).
 static void PressTile(GUObject* item) {
@@ -426,6 +431,9 @@ static void Script() {
         Dev(cmd.c_str());
     });
     add(0.8, [] { Dev("state"); Snap("fusion_view"); });
+    add(0.3, [] { Dev("hudwide 2.8"); });  // flat, the tubes sit at the screen's sides: stretch the HUD into them
+    add(0.8, [] { Snap("fusion_hud_in_tubes"); });
+    add(0.3, [] { Dev("hudwide 1"); });
     add(0.3, [] { GoggleModel(true); Dev("up"); });
     add(1.0, [] { Snap("night_no_nvg"); });
     add(0.3, [] { Dev("down"); });
@@ -445,6 +453,13 @@ static void Script() {
     add(0.5, [] { Dev("down"); });
     add(1.5, [] { Dev("state"); Overlays("ecoti on"); GoggleModel(false); });
     add(0.8, [] { Snap("ecoti_nvg"); });
+    add(0.3, [] {  // flat, the right tube sits about 38 deg right of ahead: turn so the AI (13 deg right) is in it
+        Params r(Pawn(), "K2_AddActorWorldRotation");
+        r.Set("DeltaRotation", Rot{0, -25, 0}).Set("bSweep", false).Set("bTeleport", true).Call();
+    });
+    add(1.0, [] { Dev("state"); });
+    add(0.8, [] { Snap("ecoti_in_tube"); });
+    add(0.3, [] { Params r(Pawn(), "K2_AddActorWorldRotation"); r.Set("DeltaRotation", Rot{0, 25, 0}).Set("bSweep", false).Set("bTeleport", true).Call(); });
     add(0.3, [] { GoggleModel(true); });
     add(0.3, [] { Dev("up"); });
     add(0.8, [] {

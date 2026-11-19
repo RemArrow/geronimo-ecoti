@@ -375,18 +375,24 @@ static GUObject* s_mats[3] = {};  // body, lens, accent
 static GUObject* s_meshEcoti = nullptr;
 static GUObject* s_meshFusion = nullptr;
 static GUObject* s_meshHud = nullptr;
+static GUObject* s_hudQuad = nullptr;  // /ECOTIHeat/SM_ECOTIHudQuad: the HUD plane when the mod plugin is there
 static GUObject* s_heatMat = nullptr;  // the overlay on everything warm (alive)
 static GUObject* s_hudMat = nullptr;
 static GUObject* s_hudRT = nullptr;
 static GUObject* s_blend = nullptr;    // the engine's translucent unlit glTF material
+static GUObject* s_heatBase = nullptr; // the heat's parent: our M_ECOTIHeat (tube-masked), else s_blend
+static bool s_heatMasked = false;      // s_heatBase is M_ECOTIHeat
 static bool s_assetsTried = false, s_assetsOk = false;
 static constexpr int kHudW = 1280, kHudH = 800;
 
-// The heat colour. The engine's glTF material multiplies it by the mesh's vertex colours, and the game paints
-// those (they mask its camo and gear tints): a plain white would come out red, purple, white in patches. The
-// goggle's picture is monochrome (its post-process takes brightness only), so the heat is made far brighter than
-// white: every tinted patch then saturates, and a body reads as one white-hot shape.
-static float HeatLevel() { return (float)Clamp(s_cfgHeat.Value(), 0, 4) * 6.0f; }
+// The heat colour. The heat's own material (/ECOTIHeat/M_ECOTIHeat, a cooked content plugin under this plugin's
+// Mods folder) draws only where the goggle's lenses are on screen: the lenses write custom stencil 250 while
+// powered, the same mask the game's night-vision picture uses, so the heat never shows in the bare-eye view round
+// the tubes. It ignores vertex colours; white a bit above 1 saturates the monochrome picture.
+// Without it (the mod plugin missing) the engine's glTF material stands in: that one multiplies by the mesh's
+// vertex colours, which the game paints (red, purple patches), so the heat is made far brighter than white and
+// saturates - but it also shows round the tubes.
+static float HeatLevel() { return (float)Clamp(s_cfgHeat.Value(), 0, 4) * (s_heatMasked ? 2.0f : 6.0f); }
 
 static GUObject* ImportObj(const char* name, const std::string& text, GUObject* const* mats, int count) {
     static const char* groups[] = {"Body", "Lens", "Accent"};
@@ -491,14 +497,32 @@ static bool BuildAssets() {
     s_blend = LoadObject("/InterchangeAssets/gltf/MaterialInstances/MI_Unlit_Blend_DS.MI_Unlit_Blend_DS").ptr;
     if (!s_blend) s_blend = LoadObject("/InterchangeAssets/gltf/MaterialInstances/MI_Unlit_Blend.MI_Unlit_Blend").ptr;
     if (!opaque || !s_blend) { Error("the engine's glTF materials are missing"); return false; }
+    API->KeepAlive(s_blend);  // used later (fallbacks); nothing else may reference it, and the GC reuses its memory
+    s_heatBase = LoadObject("/ECOTIHeat/M_ECOTIHeat.M_ECOTIHeat").ptr;
+    if (s_heatBase) API->KeepAlive(s_heatBase);  // dead bodies get new instances of it at any time
+    s_heatMasked = s_heatBase != nullptr;
+    if (!s_heatBase) {
+        Warn("the heat material /ECOTIHeat/M_ECOTIHeat is missing (GML/plugins/ECOTI/Mods/ECOTIHeat) - heat falls back to a material that also shows outside the tubes");
+        s_heatBase = s_blend;
+    }
     s_mats[0] = Mid(opaque, {0.011f, 0.011f, 0.010f, 1}, 0.0f, 0.72f);   // black polymer
     s_mats[1] = Mid(opaque, {0.05f, 0.042f, 0.065f, 1}, 0.9f, 0.12f);    // germanium: dark, glossy, a violet sheen
     s_mats[2] = Mid(opaque, {0.006f, 0.006f, 0.006f, 1}, 0.0f, 0.9f);    // rubber
     s_meshEcoti = ImportObj("ecoti", EcotiObj(), s_mats, 3);
     s_meshFusion = ImportObj("fusion_core", FusionObj(), s_mats, 3);
     float h = HeatLevel(), a = s_cfgHeatAlpha.Value();
-    s_heatMat = Mid(s_blend, {h, h, h, a});
-    s_hudMat = Mid(s_blend, {1, 1, 1, 1});
+    s_heatMat = Mid(s_heatBase, {h, h, h, a});
+    // The HUD's own material draws only inside the tubes too (lens stencil 250); without the mod plugin the glTF one.
+    GUObject* hudBase = LoadObject("/ECOTIHeat/M_ECOTIHud.M_ECOTIHud").ptr;
+    if (hudBase) API->KeepAlive(hudBase);
+    else Warn("the HUD material /ECOTIHeat/M_ECOTIHud is missing - the fusion HUD also shows outside the tubes");
+    s_hudMat = Mid(hudBase ? hudBase : s_blend, {1, 1, 1, 1});
+    // Its plane: our cooked quad on a StaticMeshComponent (a GML dynamic mesh draws nothing with our cooked materials).
+    if (hudBase && (s_hudQuad = LoadObject("/ECOTIHeat/SM_ECOTIHudQuad.SM_ECOTIHudQuad").ptr)) API->KeepAlive(s_hudQuad);
+    if (hudBase && !s_hudQuad) {
+        Warn("the HUD plane /ECOTIHeat/SM_ECOTIHudQuad is missing - the fusion HUD also shows outside the tubes");
+        s_hudMat = Mid(s_blend, {1, 1, 1, 1});
+    }
     if (s_hudMat) {
         GUObject* hudParts[1] = {s_hudMat};
         s_meshHud = ImportObj("fusion_hud", HudObj(s_cfgHudFov.Value(), (double)kHudW / kHudH), hudParts, 1);
@@ -900,7 +924,7 @@ static void UpdateHeat() {
         GUObject* mat = s_heatMat;
         if (t.diedAt >= 0) {
             double left = 1 - (now - t.diedAt) / cool;
-            if (!t.mid) t.mid = API->CreateMaterialInstance(s_blend);
+            if (!t.mid) t.mid = API->CreateMaterialInstance(s_heatBase);
             if (t.mid) {
                 float h = HeatLevel() * (float)(0.05 + 0.95 * std::max(0.0, left) * std::max(0.0, left)),
                       al = s_cfgHeatAlpha.Value() * (float)std::max(0.0, left);
@@ -944,6 +968,7 @@ struct Hud {
     double dist = 150;
 };
 static Hud s_hud;
+static double s_devHudWide = 1;  // ECOTI_Dev "hudwide": the HUD plane stretched sideways (tests)
 
 struct Waypoint { V3 at; std::string label; int shape; };  // shape 0 team, 1 waypoint, 2 extraction, 3 objective
 static bool s_userWpSet = false;
@@ -1152,7 +1177,20 @@ static void UpdateHud(double dt) {
         if (s_hud.comp && Alive(s_hud.comp.ptr)) Destroy(s_hud.comp);
         GUObject* parts[1] = {s_hudMat};
         s_hud = Hud{};
-        s_hud.comp = API->AddDynamicMeshComponent(s_nvg.ptr, s_meshHud, parts, 1);
+        if (s_hudQuad) {  // the cooked 200 x 200 quad 100 ahead, scaled to the HUD's size every frame
+            Params ac(s_nvg, "AddComponentByClass");
+            ac.Set("Class", FindClass("StaticMeshComponent")).Set("bManualAttachment", false).Set("bDeferredFinish", false);
+            auto* t = (double*)ac.Ptr("RelativeTransform");  // FTransform: quat (x y z w), translation (+pad), scale
+            std::memset(t, 0, 96);
+            t[3] = 1; t[8] = t[9] = t[10] = 1;
+            ac.Call();
+            s_hud.comp = ac.Return<GUObject*>();
+            if (s_hud.comp) {
+                Params sm(s_hud.comp, "SetStaticMesh"); sm.SetObj("NewMesh", Object(s_hudQuad)).Call();
+                Params mt(s_hud.comp, "SetMaterial"); mt.Set("ElementIndex", (int32_t)0).SetObj("Material", Object(s_hudMat)).Call();
+                Params col(s_hud.comp, "SetCollisionEnabled"); col.Set("NewType", (uint8_t)0).Call();
+            }
+        } else s_hud.comp = API->AddDynamicMeshComponent(s_nvg.ptr, s_meshHud, parts, 1);
         s_hud.actor = s_nvg.ptr;
         if (!s_hud.comp) return;
         Attach(s_hud.comp, cam, 2);
@@ -1180,7 +1218,11 @@ static void UpdateHud(double dt) {
     double target = Clamp(nearest * 0.85, 25, farCm);
     s_hud.dist = target < s_hud.dist ? target : s_hud.dist + (target - s_hud.dist) * std::min(1.0, dt * 3);
     SetRel(s_hud.comp, {});
-    SetScale(s_hud.comp, s_hud.dist / 100);
+    {   // the dynamic mesh is built at the HUD's size; the cooked quad is 200 x 200 and is scaled to it
+        double s = s_hud.dist / 100, sy = s_hudQuad ? -tw : 1, sz = s_hudQuad ? th : 1;  // the quad imported mirrored side to side: -tw puts it back (its material is two-sided)
+        Params p(s_hud.comp, "SetRelativeScale3D");  // s_devHudWide: dev only, a flat test's view reaches the tubes
+        p.Set("NewScale3D", V3{s, s * sy * s_devHudWide, s * sz}).Call();
+    }
     DrawHud(cam, me, s_cfgHudFov.Value());
 }
 
@@ -1272,6 +1314,7 @@ extern "C" __declspec(dllexport) void ECOTI_Dev(const char* cmd) {
         V3 v;
         if (sscanf_s(c.c_str() + 5, "%lf %lf %lf", &v.x, &v.y, &v.z) == 3) { s_userWp = v; s_userWpSet = true; }
     } else if (c == "heat") UpdateHeat();
+    else if (c.rfind("hudwide ", 0) == 0) s_devHudWide = std::max(0.1, atof(c.c_str() + 8));  // "hudwide <k>": HUD stretched k x
     else Warn("ECOTI_Dev: unknown command '{}'", c);
 }
 

@@ -1,0 +1,13 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "ECOTIHeat",
+	"Description": "The ECOTI Thermal Fusion heat material: drawn only where the goggle's lenses are (custom stencil 250)",
+	"Category": "Modding",
+	"CreatedBy": "RemArrow",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"EnabledByDefault": true
+}

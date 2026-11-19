@@ -35,6 +35,9 @@ if /i "%1"=="install" (
   echo === install to "%GAME%\GML\plugins\ECOTI"
   if not exist "%GAME%\GML\plugins\ECOTI" mkdir "%GAME%\GML\plugins\ECOTI"
   copy /y "%OUT%\ECOTI\ECOTI.dll" "%GAME%\GML\plugins\ECOTI\" >nul || exit /b 1
+  rem The heat material: a cooked content plugin (UEMaps\Geronimo\Mods\ECOTIHeat). GML mirrors it into the game's Mods.
+  robocopy "%ROOT%Mods" "%GAME%\GML\plugins\ECOTI\Mods" /MIR /NJH /NJS /NFL /NDL /NP >nul
+  if errorlevel 8 exit /b 1
 )
 echo === done
 exit /b 0

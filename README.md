@@ -23,9 +23,11 @@ looks like the stock one. Nothing in the game is replaced.
 ## How it looks through the tubes
 
 The heat is the thermal channel laid over the tubes' picture. The game's night-vision post-process turns
-everything into the phosphor's colour, and a warm body comes out as a white-hot shape. Walls and cover still
-hide people: thermal does not see through walls. The HUD sits in the picture at up to 3 m. When something
-closer is in the way it moves in, at the same apparent size, so it never sinks into a wall.
+everything into the phosphor's colour, and a warm body comes out as a white-hot shape. The heat shows only
+inside the tubes, as a real clip-on's picture does: the bare-eye view around them stays as it is. Walls and cover still
+hide people: thermal does not see through walls. The HUD sits in the picture at up to 3 m, and like the heat it
+shows only inside the tubes. When something closer is in the way it moves in, at the same apparent size, so it
+never sinks into a wall.
 
 ## Settings
 
@@ -61,21 +63,26 @@ closer is in the way it moves in, at the same apparent size, so it never sinks i
    housing's own bounds on top of the bridge. Other players with the plugin see them on your goggle.
 4. **Heat.** While the goggle is down and powered (`NVGDevice.IsPowered`), every drawn skeletal mesh of every
    character gets a translucent unlit overlay. Each AI animates an invisible body under the outfit you see, so
-   only the outfit glows. The engine's glTF material multiplies by vertex colours, which the game paints, so the
-   heat is made far brighter than white. Every patch then saturates in the monochrome picture. A dead body gets
-   its own copy that fades.
+   only the outfit glows. The overlay is the plugin's own material, `/ECOTIHeat/M_ECOTIHeat`, a small cooked
+   content plugin in `Mods\ECOTIHeat` (GML mirrors it into the game's `Mods` folder). It is drawn only where
+   custom stencil = 250. The goggle's lenses write that while powered, and it is the same mask the game's
+   night-vision picture uses, so heat never shows outside the tubes. A dead body gets its own copy that fades.
+   Its sources and the steps to rebuild it are in [heat/](heat/).
 5. **HUD.** A quad attached to the VR camera, seen only by you, shows a render target that is redrawn every
    frame. Unreal's canvas text leaves alpha at 0 in a see-through target, so the text uses a Consolas Bold
    atlas made with GDI at startup and drawn as masked glyphs. Markers are projected through the camera, and
-   five traces keep the plane in front of walls.
+   five traces keep the plane in front of walls. The quad is `/ECOTIHeat/SM_ECOTIHudQuad` on a static mesh
+   component, with `/ECOTIHeat/M_ECOTIHud`: the render target masked to the tubes by the same stencil. If the
+   mod plugin is missing, the heat and HUD fall back to the engine's glTF material, which also shows outside the
+   tubes.
 
 ## Install
 
-Needs [GML 2.2.0 or newer](https://github.com/RemArrow/geronimo-mod-loader/releases). The easiest way is
+Needs [GML 2.4.0 or newer](https://github.com/RemArrow/geronimo-mod-loader/releases). The easiest way is
 [GML Manager](https://github.com/RemArrow/geronimo-mod-loader#gml-manager): ECOTI Thermal Fusion is in its Browse tab. By hand: close
 the game, download `ECOTI-<version>.zip` from [Releases](https://github.com/RemArrow/geronimo-ecoti/releases) and
-extract it into `...GERONIMOGeronimoBinariesWin64`. That adds `GMLplugins$d`. To remove the
-plugin, delete that folder.
+extract it into `...\GERONIMO\Geronimo\Binaries\Win64`. That adds `GML\plugins\ECOTI` (with its `Mods\ECOTIHeat`).
+To remove the plugin, delete that folder.
 
 ## Build and install
 
@@ -83,18 +90,21 @@ plugin, delete that folder.
 build.bat install
 ```
 
-Needs Visual Studio 2022 and the GML SDK (`..\ModLoader\include`). There are no art files. To turn it off,
+Needs Visual Studio 2022 and the GML SDK (`..\ModLoader\include`). There are no art files; the cooked heat
+plugin in `Mods\ECOTIHeat` is committed (its sources are in `heat\`). To turn it off,
 put a `disabled.txt` in `GML\plugins\ECOTI` (or use GML's plugin list).
 
 ## Tested
 
-`tests\ECOTIDev` (in game, Training Grounds, no headset) passes all of these:
+`tests\ECOTIDev` (in game, Training Grounds, no headset; run with `tests\run_test.ps1`, which snapshots and
+restores saves, configs and plugins) passes all of these:
 - the 7 entries;
 - picking one from a tile;
 - a runtime entry converted;
 - both clip-on fits;
 - heat on, off, and cooling after death, at night with an AI in front;
-- the HUD's compass, waypoint and status;
+- heat only inside the tubes: an AI half in a tube glows only in it, and none from beside it;
+- the HUD's compass, waypoint and status, inside the tubes only (stretched sideways in the test to reach them);
 - an outfit saved and loaded (including the game leaving the old goggle's actor on the helmet, which the
   plugin rebuilds).
 
